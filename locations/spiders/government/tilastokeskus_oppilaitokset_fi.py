@@ -97,8 +97,9 @@ class TilastokeskusOppilaitoksetFISpider(Spider):
             return None
 
         self._count("oltyp/" + str(props.get("oltyp")).strip())
-        if str(props.get("oltyp")).strip() == "12":  # Erityiskoulut are special-education schools.
-            item["extras"]["school"] = "special_education_needs"
+        # OLTYP 12 (erityiskoulu) is a special-only school; =yes is for mainstream schools per the wiki.
+        if str(props.get("oltyp")).strip() == "12":
+            item["extras"]["school:special_needs"] = "only"
 
         apply_category(Categories.SCHOOL, item)
 
