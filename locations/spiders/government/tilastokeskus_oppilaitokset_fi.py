@@ -8,9 +8,7 @@ from locations.items import Feature
 from locations.licenses import Licenses
 
 # https://avoindata.suomi.fi/data/fi/dataset/oppilaitokset
-# Tilastokeskus school register extract: peruskoulut, lukiot and
-# yhtenäiskoulut with name and point geometry. OLO=0 rows are active;
-# other values are closed, merged or inactive units, not locations.
+# Only OLO=0 rows are active schools; other values are closed/merged/inactive units.
 
 
 class TilastokeskusOppilaitoksetFISpider(Spider):
@@ -32,50 +30,74 @@ class TilastokeskusOppilaitoksetFISpider(Spider):
         )
 
     async def start(self) -> AsyncIterator[JsonRequest]:
+        self._last_first_id = None
         yield JsonRequest(url=self.wfs_url(0), cb_kwargs={"start_index": 0})
 
     def parse(self, response: TextResponse, start_index: int) -> Iterable[Feature | JsonRequest]:
         payload = response.json()  # ty: ignore[unresolved-attribute]
         features = payload.get("features") or []
 
+        if not features:
+            self._count("empty_page")
+            matched = payload.get("numberMatched")
+            if isinstance(matched, int) and start_index < matched:
+                self.logger.error("Empty WFS page at startIndex=%s of %s matched", start_index, matched)
+            return
+
+        # A server ignoring startIndex would loop forever; consecutive repeats stop it.
+        first_id = features[0].get("id")
+        if first_id is not None and first_id == self._last_first_id:
+            self.logger.error("WFS page repeat at startIndex=%s, stopping", start_index)
+            return
+        self._last_first_id = first_id
+
         for feature in features:
             if item := self.parse_feature(feature):
                 yield item
 
-        # Step by received count and stop on an empty page, so a
-        # server-side page cap can never silently truncate the tail.
-        if features:
-            next_index = start_index + len(features)
-            yield JsonRequest(url=self.wfs_url(next_index), cb_kwargs={"start_index": next_index})
+        # Step by received count so a server-side page cap cannot truncate the tail.
+        next_index = start_index + len(features)
+        yield JsonRequest(url=self.wfs_url(next_index), cb_kwargs={"start_index": next_index})
 
     def parse_feature(self, feature: dict) -> Feature | None:
         props = feature.get("properties") or {}
 
-        if str(props.get("olo")) != "0":
+        if str(props.get("olo")).strip() != "0":
             self._count("skipped_status/" + str(props.get("olo")))
             return None
 
         item = Feature()
 
-        if not (tunn := props.get("tunn")):
+        tunn = props.get("tunn")
+        if isinstance(tunn, str):
+            tunn = tunn.strip()
+        if not tunn:
             self._count("skipped_no_ref")
             return None
         item["ref"] = str(tunn)
 
-        if name := (props.get("onimi") or "").strip():
-            item["name"] = name
-        else:
+        name = props.get("onimi")
+        if not isinstance(name, str) or not name.strip():
             self._count("skipped_no_name")
             return None
+        item["name"] = name.strip()
 
         geometry = feature.get("geometry") or {}
+        if geometry.get("type") != "Point":
+            self._count("skipped_bad_geometry")
+            return None
         coords = geometry.get("coordinates") or []
-        if geometry.get("type") != "Point" or len(coords) != 2:
+        if len(coords) != 2:
             self._count("skipped_no_coords")
             return None
-        item["lon"], item["lat"] = coords[0], coords[1]
+        try:
+            item["lon"], item["lat"] = float(coords[0]), float(coords[1])
+        except (TypeError, ValueError):
+            self._count("skipped_no_coords")
+            return None
 
-        if str(props.get("oltyp")) == "12":
+        self._count("oltyp/" + str(props.get("oltyp")).strip())
+        if str(props.get("oltyp")).strip() == "12":  # Erityiskoulut are special-education schools.
             item["extras"]["school"] = "special_education_needs"
 
         apply_category(Categories.SCHOOL, item)
