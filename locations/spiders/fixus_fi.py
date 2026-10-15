@@ -5,16 +5,35 @@ from scrapy import Spider
 from scrapy.exceptions import CloseSpider
 from scrapy.http import JsonRequest, Response
 
-from locations.categories import Categories, apply_category
+from locations.categories import Categories, Extras, apply_category, apply_yes_no
 from locations.hours import DAYS_FI, OpeningHours
-from locations.items import Feature
+from locations.items import Feature, SocialMedia, set_social_media
 
 GROUP_SHOP = "63c5520f34d341001995f3ca"
 GROUP_REPAIR = "63c5522b34d341001995f3cb"
 FIELD_HOURS = "63c55e80a7ee610012eb0dcf"
 FIELD_PHONE_CONT = "63c6512134d341001995f408"
 FIELD_WEBSITE = "63c55e3f2a67ee00333a9cdd"
+FIELD_FACEBOOK = "63c55607a7ee610012eb0dc7"
+FIELD_INSTAGRAM = "63c555862466640020289c98"
+FIELD_WHATSAPP = "63c555e82a67ee00333a9cd4"
 FIELD_ACTIVE = "6537747eb3b2be0011d192df"
+SERVICE_EXTRAS = {
+    "63c64e182466640020289cb2": Extras.VEHICLE_INSPECTION_SERVICES,  # Katsastuspalvelu.
+    "63c64d142466640020289cb0": Extras.VEHICLE_AIR_CONDITIONING_SERVICES,  # Ilmastointi.
+    "63c650962466640020289cb8": Extras.VEHICLE_TYRE_SERVICES,  # Vaihto/Tasapainotus.
+    "63c64f5b34d341001995f3fe": Extras.VEHICLE_EXHAUST_SERVICES,  # Pakokaasutesti.
+    "63c64f3fa7ee610012eb0def": Extras.VEHICLE_EXHAUST_SERVICES,  # Pakokaasutesti diesel.
+    "63c64f1c2a67ee00333a9d00": Extras.VEHICLE_WHEEL_ALIGNMENT_SERVICES,  # Ohjauskulmat.
+    "63c64e802466640020289cb4": Extras.VEHICLE_WINDSCREEN_REPLACEMENT_SERVICES,  # Lasityot.
+    "63c64ea134d341001995f3fc": Extras.VEHICLE_PAINTING_SERVICES,  # Maalaamo.
+    "63c650b12466640020289cba": Extras.VEHICLE_BODY_REPAIR_SERVICES,  # Vauriokorjaamo.
+    "63c64a8ba7ee610012eb0de5": Extras.VEHICLE_TYRE_SERVICES,  # Myymala renkaat.
+    "63c64d59a7ee610012eb0ded": Extras.VEHICLE_BRAKE_SERVICES,  # Jarrutesti.
+    "63c64d38a7ee610012eb0deb": Extras.VEHICLE_SUSPENSION_SERVICES,  # Iskaritestaus.
+    "63c64df62a67ee00333a9cf6": Extras.VEHICLE_CLUTCH_SERVICES,  # Kaksoiskytkin.
+    "63c64fba2a67ee00333a9d02": Extras.VEHICLE_PLANNED_MAINTENANCE_SERVICES,  # Pikahuolto.
+}
 HOURS_CLOSED = ["suljettu", "closed", "off"]
 DROP_SEGMENT = re.compile(r"\baukioloajan\b|\bpuh\.", re.IGNORECASE)
 DEPT_CUT = re.compile(r"\b(tukkumyynti|kahvio)\b\s*:.*", re.IGNORECASE)
@@ -103,6 +122,8 @@ class FixusFISpider(Spider):
             self._stat("empty/website")
         if hours := self.parse_hours((place.get("data") or {}).get(FIELD_HOURS)):
             item["opening_hours"] = hours
+        self.apply_socials(item, place.get("data") or {})
+        self.apply_services(item, place.get("data") or {})
         apply_category(category, item)
         return item
 
@@ -123,6 +144,30 @@ class FixusFISpider(Spider):
             self._stat("website/fallback")
             return koti
         return None
+
+    def apply_socials(self, item: Feature, data: dict) -> None:
+        if facebook := self.parse_link(data.get(FIELD_FACEBOOK)):
+            item["facebook"] = facebook
+        if instagram := self.parse_link(data.get(FIELD_INSTAGRAM)):
+            set_social_media(item, SocialMedia.INSTAGRAM, instagram)
+        if whatsapp := self.parse_whatsapp(data.get(FIELD_WHATSAPP)):
+            set_social_media(item, SocialMedia.WHATSAPP, whatsapp)
+
+    def parse_link(self, value: object) -> str | None:
+        url = value.strip() if isinstance(value, str) else ""
+        return url if url.startswith(("http://", "https://")) else None
+
+    def parse_whatsapp(self, value: object) -> str | None:
+        text = value.strip() if isinstance(value, str) else ""
+        if text.startswith("https://wa.me/"):
+            return "+" + text.removeprefix("https://wa.me/")
+        return text if text.startswith("+") else None
+
+    def apply_services(self, item: Feature, data: dict) -> None:
+        for field_id, extra in SERVICE_EXTRAS.items():
+            if data.get(field_id) is True:
+                apply_yes_no(extra, item, True)
+                self._stat("service/applied")
 
     def parse_hours(self, raw: str | None) -> OpeningHours | None:
         text = (raw or "").strip()
