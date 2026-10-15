@@ -51,7 +51,7 @@ DAY_TOKEN = re.compile(r"(?i)(?<!\w)(ma|ti|ke|to|pe|la|su)(?!\w)")
 class FixusFISpider(Spider):
     name = "fixus_fi"
     # Q127515000 verified (Fixus, P856 fixus.fi); no NSI entry yet.
-    item_attributes = {"brand": "Fixus", "brand_wikidata": "Q127515000"}
+    item_attributes = {"brand": "Fixus", "brand_wikidata": "Q127515000", "name": "Fixus"}
     allowed_domains = ["locator.maplet.com"]
 
     async def start(self) -> AsyncIterator[JsonRequest]:
