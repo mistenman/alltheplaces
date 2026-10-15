@@ -44,8 +44,7 @@ DASH_MINUTES = re.compile(r"(\d{1,2}[.:]\d{2}\s*-\s*\d{1,2})-(\d{2})(?!\d)")  # 
 BY_AGREEMENT = re.compile(r"(?i)sopimuksen mukaan")
 SHOP_LABEL = re.compile(r"(?i)^myymälä:\s*")
 LUNCH_BREAK = re.compile(r"\((\d{1,2}[.:]\d{2})\s*-\s*(\d{1,2}[.:]\d{2})[^)]*?\bsuljettu\b[^)]*\)", re.IGNORECASE)
-HEAD_RANGE = re.compile(r"^\s*([A-Za-z]{2}\s*-\s*[A-Za-z]{2})\s+(\d{1,2}[.:]\d{2})\s*-\s*(\d{1,2}[.:]\d{2})")
-DAY_TOKEN = re.compile(r"(?i)(?<!\w)(ma|ti|ke|to|pe|la|su)(?!\w)")
+HEAD_RANGE = re.compile(r"^\s*([A-Za-z]{2}(?:\s*-\s*[A-Za-z]{2})?)\s+(\d{1,2}[.:]\d{2})\s*-\s*(\d{1,2}[.:]\d{2})")
 
 
 class FixusFISpider(Spider):
@@ -197,18 +196,6 @@ class FixusFISpider(Spider):
         if not text:
             self._stat("hours/empty")
             return None
-        if lunch := LUNCH_BREAK.search(text):
-            if head := HEAD_RANGE.match(text):
-                oh = OpeningHours()
-                try:
-                    oh.add_ranges_from_string(f"{head[1]} {head[2]}-{lunch[1]}", days=DAYS_FI)
-                    oh.add_ranges_from_string(f"{head[1]} {lunch[2]}-{head[3]}", days=DAYS_FI)
-                except ValueError:
-                    self._stat("hours/bad_range")
-                    return None
-                self._stat("hours/lunch_split")
-                return oh
-            self._stat("hours/lunch_unparsed")
         text = OCLOCK.sub("", text)
         text = DOT_TYPO.sub(r"\1-\2", text)
         text = text.replace("-.", "-")  # Upstream range typo (08.00-.17.00).
@@ -219,18 +206,31 @@ class FixusFISpider(Spider):
         cleaned = DEPT_CUT.sub("", text)
         if cleaned != text:
             self._stat("hours/dropped_segment")
-        segments = [SHOP_LABEL.sub("", s).strip() for s in cleaned.split(",")]
-        kept = [s for s in segments if s and not DROP_SEGMENT.search(s)]
-        if len(kept) != len([s for s in segments if s]):
-            self._stat("hours/dropped_segment")
-        if not kept or not DAY_TOKEN.search(" ".join(kept)):
-            self._stat("hours/unparsed")
-            return None
         oh = OpeningHours()
-        try:
-            oh.add_ranges_from_string(", ".join(kept), days=DAYS_FI, closed=HOURS_CLOSED)
-        except ValueError:
-            self._stat("hours/bad_range")
+        for segment in cleaned.split(","):
+            segment = SHOP_LABEL.sub("", segment).strip()
+            if not segment or DROP_SEGMENT.search(segment):
+                if segment:
+                    self._stat("hours/dropped_segment")
+                continue
+            if lunch := LUNCH_BREAK.search(segment):
+                if head := HEAD_RANGE.match(segment):
+                    try:
+                        oh.add_ranges_from_string(f"{head[1]} {head[2]}-{lunch[1]}", days=DAYS_FI)
+                        oh.add_ranges_from_string(f"{head[1]} {lunch[2]}-{head[3]}", days=DAYS_FI)
+                    except ValueError:
+                        self._stat("hours/bad_range")
+                        return None
+                    self._stat("hours/lunch_split")
+                    continue
+                self._stat("hours/lunch_unparsed")
+            try:
+                oh.add_ranges_from_string(segment, days=DAYS_FI, closed=HOURS_CLOSED)
+            except ValueError:
+                self._stat("hours/bad_range")
+                return None
+        if not oh:
+            self._stat("hours/unparsed")
             return None
         return oh
 
