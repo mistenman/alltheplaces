@@ -143,7 +143,8 @@ class FixusFISpider(Spider):
         cont = ((place.get("data") or {}).get(FIELD_PHONE_CONT) or "").strip().lstrip(", ")
         if cont:
             self._stat("phone/continued")
-            phone = f"{phone}, {cont}" if phone else cont
+            # "; " is the separator the ATP phone clean-up pipeline splits on.
+            phone = f"{phone}; {cont}" if phone else cont
         return phone or None
 
     def parse_website(self, place: dict) -> str | None:
