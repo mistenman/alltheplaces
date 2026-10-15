@@ -26,10 +26,10 @@ SERVICE_EXTRAS = {
     "63c64f5b34d341001995f3fe": Extras.VEHICLE_EXHAUST_SERVICES,  # Pakokaasutesti.
     "63c64f3fa7ee610012eb0def": Extras.VEHICLE_EXHAUST_SERVICES,  # Pakokaasutesti diesel.
     "63c64f1c2a67ee00333a9d00": Extras.VEHICLE_WHEEL_ALIGNMENT_SERVICES,  # Ohjauskulmat.
-    "63c64e802466640020289cb4": Extras.VEHICLE_WINDSCREEN_REPLACEMENT_SERVICES,  # Lasityot.
+    "63c64e802466640020289cb4": Extras.VEHICLE_WINDSCREEN_REPLACEMENT_SERVICES,  # Lasityöt.
     "63c64ea134d341001995f3fc": Extras.VEHICLE_PAINTING_SERVICES,  # Maalaamo.
     "63c650b12466640020289cba": Extras.VEHICLE_BODY_REPAIR_SERVICES,  # Vauriokorjaamo.
-    "63c64a8ba7ee610012eb0de5": Extras.VEHICLE_TYRE_SERVICES,  # Myymala renkaat.
+    "63c64a8ba7ee610012eb0de5": Extras.VEHICLE_TYRE_SERVICES,  # Myymälä renkaat.
     "63c64d59a7ee610012eb0ded": Extras.VEHICLE_BRAKE_SERVICES,  # Jarrutesti.
     "63c64d38a7ee610012eb0deb": Extras.VEHICLE_SUSPENSION_SERVICES,  # Iskaritestaus.
     "63c64df62a67ee00333a9cf6": Extras.VEHICLE_CLUTCH_SERVICES,  # Kaksoiskytkin.
@@ -167,7 +167,11 @@ class FixusFISpider(Spider):
 
     def parse_link(self, value: object) -> str | None:
         url = value.strip() if isinstance(value, str) else ""
-        return url if url.startswith(("http://", "https://")) else None
+        if url.startswith(("http://", "https://")):
+            return url
+        if url:
+            self._stat("social/dropped")
+        return None
 
     def parse_whatsapp(self, value: object) -> str | None:
         text = value.strip() if isinstance(value, str) else ""
@@ -176,7 +180,11 @@ class FixusFISpider(Spider):
             if digits.startswith("0"):  # Domestic trunk prefix is dropped after +358.
                 return "+358" + digits.lstrip("0")
             return "+" + digits
-        return text if text.startswith("+") else None
+        if text.startswith("+"):
+            return text
+        if text:
+            self._stat("social/dropped")
+        return None
 
     def apply_services(self, item: Feature, data: dict) -> None:
         for field_id, extra in SERVICE_EXTRAS.items():
