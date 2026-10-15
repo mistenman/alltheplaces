@@ -4,6 +4,7 @@ from typing import AsyncIterator, Iterable
 from scrapy import Spider
 from scrapy.exceptions import CloseSpider
 from scrapy.http import JsonRequest, Response
+from twisted.python.failure import Failure
 
 from locations.categories import Categories, Extras, apply_category, apply_yes_no
 from locations.hours import DAYS_FI, OpeningHours
@@ -56,15 +57,26 @@ class FixusFISpider(Spider):
     async def start(self) -> AsyncIterator[JsonRequest]:
         yield JsonRequest(
             "https://locator.maplet.com/api/public/v3/fixusmap/places?type=place&layer=default",
+            errback=self.errback,
             dont_filter=True,
         )
 
+    def errback(self, failure: Failure) -> None:
+        raise CloseSpider(f"request failed: {failure.value!r}")
+
     def parse(self, response: Response) -> Iterable[Feature]:
         places = response.json()  # ty: ignore[unresolved-attribute]
+        if not isinstance(places, list):
+            self._stat("empty/shape")
+            raise CloseSpider("unexpected response shape")
         if not places:
             self._stat("empty/feed")
             raise CloseSpider("no records")
         for place in places:
+            if not isinstance(place, dict):
+                self.logger.warning("Skipping non-dict record")
+                self._stat("unmapped/record")
+                continue
             if item := self.parse_place(place):
                 yield item
 
