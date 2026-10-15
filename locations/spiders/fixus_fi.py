@@ -160,7 +160,10 @@ class FixusFISpider(Spider):
     def parse_whatsapp(self, value: object) -> str | None:
         text = value.strip() if isinstance(value, str) else ""
         if text.startswith("https://wa.me/"):
-            return "+" + text.removeprefix("https://wa.me/")
+            digits = text.removeprefix("https://wa.me/")
+            if digits.startswith("0"):  # Domestic trunk prefix is dropped after +358.
+                return "+358" + digits.lstrip("0")
+            return "+" + digits
         return text if text.startswith("+") else None
 
     def apply_services(self, item: Feature, data: dict) -> None:
